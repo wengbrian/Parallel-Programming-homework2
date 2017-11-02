@@ -117,187 +117,85 @@ void write_png(const char* filename, const int width, const int height, const in
 
 MPI_Comm comm = MPI_COMM_WORLD;
 int rank, n;
-int num_threads;
-double left;
-double right;
-double lower;
-double upper;
-int width;
-int height;
-char* filename;
-
 
 int cal(double x0, double y0){
+    int repeats = 0;
+    double x = 0;
+    double y = 0;
+    double length_squared = 0;
+    while (repeats < 100000 && length_squared < 4){
+        double temp = x * x - y * y + x0;
+        y = 2 * x * y + y0;
+        x = temp;
+        length_squared = x * x + y * y;
+        ++repeats;
+    }
+    return repeats;
 }
 
-void ms(int *image, int startPos, int endPos){
-    /* mandelbrot set */
-    for(int k = startPos; k < endPos; k++){
-        // infer x,y from i
-        int j = k / height, i = k % height; 
-        double y0 = j * ((upper - lower) / height) + lower;
-        double x0 = i * ((right - left) / width) + left;
-        int repeats = 0;
-        double x = 0;
-        double y = 0;
-        double length_squared = 0;
-        while (repeats < 100000 && length_squared < 4){
-            double temp = x * x - y * y + x0;
-            y = 2 * x * y + y0;
-            x = temp;
-            length_squared = x * x + y * y;
-            ++repeats;
-        }
-        image[j * width + i] = repeats;
-    }
-}
-
-int calAvg(int current, int imgSize, int lastAvg){
-    // use this function to make split more dynamic
-    int re = imgSize - current;
-    if(re < lastAvg * n){
-        if(re / n < 1)
-            return 1;
-        return re / n;
-    }
-
-}
-
-int procIfReqComp(MPI_Request *requests, int *image, int current, int lastAvg){
-    int index;
-    int flag;
-    MPI_Status status;
-    MPI_Testany(n-1, requests, &index, &flag, &status);
-    int bound[2] = {current, current+lastAvg};
-    if(index != MPI_UNDEFINED){
-        // Send to who has complete
-        myMPI_Send(bound, 2, MPI_INT, status.MPI_SOURCE, 1, comm);
-        myMPI_Irecv(image+current, lastAvg, MPI_INT, status.MPI_SOURCE, MPI_ANY_TAG, comm, &requests[status.MPI_SOURCE]);
-        return 1;
-    }
-    return 0;
-}
-void master(int *image, int startPos[], int endPos[], int imgSize){
-    MPI_Request requests[n-1];
-    // init receive
-    for(int i = 1; i < n; i++){
-        myMPI_Irecv(image+startPos[i], endPos[i]-startPos[i], MPI_INT, i, MPI_ANY_TAG, comm, &requests[i-1]);
-    }
-    /* mandelbrot set */
-    int lastAvg = imgSize * 0.5 * 0.5 / n;
-    int counter = 0;
-    for(int k = endPos[n-1]; k < imgSize; k++){
-        // infer x,y from i
-        int j = k / height, i = k % height; 
-        double y0 = j * ((upper - lower) / height) + lower;
-        double x0 = i * ((right - left) / width) + left;
-        int repeats = 0;
-        double x = 0;
-        double y = 0;
-        double length_squared = 0;
-        while (repeats < 100000 && length_squared < 4){
-            if((n > 1) && (repeats%100==0)){
-                // for every 100 timestamp, check if any request is complete
-                if(k+1 < imgSize){
-                    int result = procIfReqComp(requests, image, k+1, lastAvg);
-                    if(result > 0){
-                        // increase k
-                        k += lastAvg+1;
-                        counter++;
-                        if(counter >= n){
-                            lastAvg = calAvg(k+1, imgSize, lastAvg);
-                        }
-                    }
-                }
-            }
-
-            double temp = x * x - y * y + x0;
-            y = 2 * x * y + y0;
-            x = temp;
-            length_squared = x * x + y * y;
-            ++repeats;
-        }
-        image[j * width + i] = repeats;
-    }
-    MPI_Status statuses[n-1];
-    MPI_Waitall(n-1, requests, statuses);
-    for(int i = 1; i < n; i++){
-        myMPI_Isend(image, 1, MPI_INT, i, 0, comm, requests);
-    }
-    MPI_Waitall(n-1, requests, statuses);
-    // write file
-    if(rank == 0){ // wait
-        myMPI_Waitall(n-1, requests, statuses); 
-        /* draw and cleanup */
-        write_png(filename, width, height, image);
-    }
-}
-
-void slave(int *image, int startPos[], int endPos[]){
-    ms(image, startPos[rank], endPos[rank]);
-    // init send
-    myMPI_Send(image+startPos[rank], endPos[rank]-startPos[rank], MPI_INT, 0, 0, comm);
-    int bound[2];
-    MPI_Status status;
-    while(1){
-        myMPI_Recv(bound, 2, MPI_INT, 0, MPI_ANY_TAG, comm, &status);
-        if(status.MPI_TAG == 0)
-            break;
-        ms(image, bound[0], bound[1]);
-        myMPI_Send(image+bound[0], bound[1]-bound[0], MPI_INT, 0, 0, comm);
-    }
-}
 
 int main(int argc, char** argv) {
-    // calculate start time
     struct timespec start, end, temp;
     clock_gettime(CLOCK_MONOTONIC, &start);
-
     /* argument parsing */
     assert(argc == 9);
-    num_threads = strtol(argv[1], 0, 10);
-    left = strtod(argv[2], 0);
-    right = strtod(argv[3], 0);
-    lower = strtod(argv[4], 0);
-    upper = strtod(argv[5], 0);
-    width = strtol(argv[6], 0, 10);
-    height = strtol(argv[7], 0, 10);
-    filename = argv[8];
+    int num_threads = strtol(argv[1], 0, 10);
+    double left = strtod(argv[2], 0);
+    double right = strtod(argv[3], 0);
+    double lower = strtod(argv[4], 0);
+    double upper = strtod(argv[5], 0);
+    int width = strtol(argv[6], 0, 10);
+    int height = strtol(argv[7], 0, 10);
+    const char* filename = argv[8];
 
     // init MPI
 	MPI_Init(&argc, &argv);
 	MPI_Comm_rank(comm, &rank);
 	MPI_Comm_size(comm, &n);
 
+    // calcalate part of eac rank
     int imgSize = width*height;
-    int estiSize = imgSize*0.5;
-
-    int startPos[n];
-    int endPos[n];
-    if(n > 1)
-        startPos[1] = 0;
-    endPos[n-1] = estiSize;
-    for(int i = 2; i < n; i++){
-        startPos[i] = estiSize/n + startPos[i-1];
+    int re = imgSize % n;
+    int startPos[n], endPos[n]; 
+    startPos[0] = 0;
+    endPos[n-1] = imgSize;
+    for(int i = 1; i < n; i++){
+        startPos[i] = imgSize/n + (i < re ? 1 : 0) + startPos[i-1];
         endPos[i-1] = startPos[i];
     }
 
-    int *image;
+    /* allocate memory for image */
+    //printf("[rank %d]: %d\n", rank, endPos[rank]-startPos[rank]);
+    int* image = (int*)malloc(imgSize * sizeof(int));
+    assert(image);
+
+    MPI_Status status[n-1];
+    MPI_Request request[n-1];
     if(rank == 0){ // master
-        image = (int*)malloc(imgSize * sizeof(int));
-        assert(image);
-        master(image, startPos, endPos, imgSize);
-    }else{ // slave
-        image = (int*)malloc(estiSize/(n-1) * sizeof(int));
-        assert(image);
-        slave(image, startPos, endPos);
+        for(int i = 1; i < n; i++){
+            myMPI_Irecv(image+startPos[i], endPos[i]-startPos[i], MPI_INT, i, MPI_ANY_TAG, comm, &request[i-1]);
+        }
+    }
+    /* mandelbrot set */
+    for(int k = startPos[rank]; k < endPos[rank]; k++){
+        // infer x,y from i
+        int j = k / height, i = k % height; 
+        double y0 = j * ((upper - lower) / height) + lower;
+        double x0 = i * ((right - left) / width) + left;
+        int repeats = cal(x0,y0);
+        image[j * width + i] = repeats;
     }
 
+    if(rank != 0){ //slave
+        myMPI_Send(image+startPos[rank], endPos[rank]-startPos[rank], MPI_INT, 0, 0, comm);
+    }
+    if(rank == 0){ // wait
+        myMPI_Waitall(n-1, request, status); 
+        /* draw and cleanup */
+        write_png(filename, width, height, image);
+    }
     free(image);
-    printf("rank%d finalize\n", rank);
 	MPI_Finalize();
-
-    // calculate end time
     clock_gettime(CLOCK_MONOTONIC, &end);
     temp = diff(start, end);
     double time_used = temp.tv_sec + (double) temp.tv_nsec / 1000000000.0;
