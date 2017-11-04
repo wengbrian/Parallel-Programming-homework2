@@ -49,11 +49,9 @@ void write_png(const char* filename, const int width, const int height, const in
         memset(row, 0, row_size);
         //    printf("a");
         for (int x = 0; x < width; ++x) {
-            int counter = 0;
             while(buffer[(height - 1 - y) * width + x] == -1){
                 // if pixel is not ok
                 cal_pixel(x, y);
-
             }
             int p = buffer[(height - 1 - y) * width + x];
             row[x * 3] = ((p & 0xf) << 4);
@@ -101,25 +99,10 @@ int main(int argc, char** argv) {
         
         # pragma omp for schedule(dynamic) nowait
         for (int j = height-1; j >= 0; --j) {
-            double y0 = j * ((upper - lower) / height) + lower;
             for (int i = 0; i < width; ++i) {
                 if(image[j * width + i] != -1)
                     continue;
-                double x0 = i * ((right - left) / width) + left;
-     //           printf("%d cal (%d, %d)\n", omp_get_thread_num(), j, i);
-
-                int repeats = 0;
-                double x = 0;
-                double y = 0;
-                double length_squared = 0;
-                while (repeats < 100000 && length_squared < 4) {
-                    double temp = x * x - y * y + x0;
-                    y = 2 * x * y + y0;
-                    x = temp;
-                    length_squared = x * x + y * y;
-                    ++repeats;
-                }
-                image[j * width + i] = repeats;
+                cal_pixel(i,j);
             }
           //  printf("%d: row %d is ok\n", omp_get_thread_num(), j);
         }
