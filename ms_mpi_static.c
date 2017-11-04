@@ -164,6 +164,8 @@ int main(int argc, char** argv) {
         endPos[i-1] = startPos[i];
     }
 
+    //for(int i = 0; i < n; i++)
+    //    printf("[%d, %d]\n", startPos[i], endPos[i]);
     /* allocate memory for image */
     //printf("[rank %d]: %d\n", rank, endPos[rank]-startPos[rank]);
     int* image = (int*)malloc(imgSize * sizeof(int));
@@ -179,7 +181,7 @@ int main(int argc, char** argv) {
     /* mandelbrot set */
     for(int k = startPos[rank]; k < endPos[rank]; k++){
         // infer x,y from i
-        int j = k / height, i = k % height; 
+        int j = k / width, i = k % width; 
         double y0 = j * ((upper - lower) / height) + lower;
         double x0 = i * ((right - left) / width) + left;
         int repeats = cal(x0,y0);

@@ -1,0 +1,16 @@
+import os
+os.system('make')
+for p in [1,2,4,8,12]:
+    os.system('./ms_seq 4 -4 4 -4 4 800 400 out.png')
+    cmd = 'srun -p batch -n {} ./ms_mpi_static 4 -4 4 -4 4 800 400 out1.png'.format(p))
+    print(cmd)
+    os.system(cmd)
+    os.system('hw2-diff out.png out1.png') 
+    cmd = 'srun -p batch -n {} ./ms_mpi_dynamic 4 -4 4 -4 4 800 400 out2.png'.format(p)
+    print(cmd)
+    os.system(cmd)
+    os.system('hw2-diff out.png out2.png') 
+    cmd = 'srun -p batch -c {} ./ms_omp 4 -4 4 -4 4 800 400 out3.png'.format(p)
+    print(cmd)
+    os.system(cmd)
+    os.system('hw2-diff out.png out3.png') 
