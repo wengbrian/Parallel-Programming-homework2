@@ -83,9 +83,16 @@ int myMPI_Waitall(int count, MPI_Request array_of_requests[], MPI_Status array_o
     cummTime += time_used;
 }
 
+void calEndTime(struct timespec *start, struct timespec *end){
+    struct timespec temp;
+    clock_gettime(CLOCK_MONOTONIC, end);
+    temp = diff(*start, *end);
+    double time_used = temp.tv_sec + (double) temp.tv_nsec / 1000000000.0;
+    IOTime += time_used;
+}
+
 void write_png(const char* filename, const int width, const int height, const int* buffer) {
     struct timespec start, end, temp;
-    clock_gettime(CLOCK_MONOTONIC, &start);
     FILE* fp = fopen(filename, "wb");
     assert(fp);
     png_structp png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
@@ -95,7 +102,9 @@ void write_png(const char* filename, const int width, const int height, const in
     png_init_io(png_ptr, fp);
     png_set_IHDR(png_ptr, info_ptr, width, height, 8, PNG_COLOR_TYPE_RGB, PNG_INTERLACE_NONE,
                  PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
+    clock_gettime(CLOCK_MONOTONIC, &start);
     png_write_info(png_ptr, info_ptr);
+    calEndTime(&start, &end);
     size_t row_size = 3 * width * sizeof(png_byte);
     png_bytep row = (png_bytep)malloc(row_size);
     for (int y = 0; y < height; ++y) {
@@ -104,16 +113,16 @@ void write_png(const char* filename, const int width, const int height, const in
             int p = buffer[(height - 1 - y) * width + x];
             row[x * 3] = ((p & 0xf) << 4);
         }
+        clock_gettime(CLOCK_MONOTONIC, &start);
         png_write_row(png_ptr, row);
+        calEndTime(&start, &end);
     }
     free(row);
+    clock_gettime(CLOCK_MONOTONIC, &start);
     png_write_end(png_ptr, NULL);
+    calEndTime(&start, &end);
     png_destroy_write_struct(&png_ptr, &info_ptr);
     fclose(fp);
-    clock_gettime(CLOCK_MONOTONIC, &end);
-    temp = diff(start, end);
-    double time_used = temp.tv_sec + (double) temp.tv_nsec / 1000000000.0;
-    IOTime += time_used;
 }
 
 MPI_Comm comm = MPI_COMM_WORLD;
@@ -129,6 +138,7 @@ char* filename;
 
 void ms(int *image, int startPos, int endPos){
     /* mandelbrot set */
+    # pragma omp parallel for schedule(dynamic) 
     for(int k = startPos; k < endPos; k++){
         // infer x,y from i
         int j = k / width, i = k % width; 
@@ -187,20 +197,16 @@ void master(int *image, int startPos[], int endPos[], int imgSize){
     int lastAvg = imgSize * 0.5 / n / split;
     int tid;
     int k;
-    #pragma omp parallel num_threads(num_threads) shared(image, requests) private(tid) 
+    // init receive
+    for(int i = 1; i < n; i++){
+        myMPI_Irecv(image+startPos[i], endPos[i]-startPos[i], MPI_INT, i, MPI_ANY_TAG, comm, requests+i-1);
+    }
+    # pragma omp parallel num_threads(num_threads) shared(image, requests) private(tid) 
     {
         tid = omp_get_thread_num();
-        // init receive
-        # pragma omp for schedule(dynamic)
-        for(int i = 1; i < n; i++){
-            myMPI_Irecv(image+startPos[i], endPos[i]-startPos[i], MPI_INT, i, MPI_ANY_TAG, comm, requests+i-1);
-        }
         /* mandelbrot set */
-        //lastAvg = imgSize / 50;
-        //lastAvg = 500;
-        //printf("[%d, %d] segmentfault\n", rank, tid);
-        # pragma omp for schedule(dynamic) nowait reduction(+: k)
-        for(int k = endPos[n-1]; k < imgSize; k++){
+        # pragma omp for schedule(dynamic)
+        for(k = endPos[n-1]; k < imgSize; k++){
             // infer x,y from i
             int j = k / width, i = k % width; 
             double y0 = j * ((upper - lower) / height) + lower;
@@ -233,7 +239,7 @@ void master(int *image, int startPos[], int endPos[], int imgSize){
     MPI_Status statuses[n-1];
     myMPI_Waitall(n-1, requests, statuses);
     for(int i = 1; i < n; i++){
-        myMPI_Isend(image, 1, MPI_INT, i, 0, comm, requests);
+        myMPI_Send(image, 1, MPI_INT, i, 0, comm);
     }
     // write file
     /* draw and cleanup */

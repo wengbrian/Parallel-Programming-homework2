@@ -16,6 +16,20 @@ int width;
 int height;
 int *image;
 
+double cummTime = 0;
+double IOTime = 0;
+double totalTime = 0;
+struct timespec diff(struct timespec start, struct timespec end) {
+    struct timespec temp;
+    if ((end.tv_nsec-start.tv_nsec)<0) {
+        temp.tv_sec = end.tv_sec-start.tv_sec-1;
+        temp.tv_nsec = 1000000000+end.tv_nsec-start.tv_nsec;
+    } else {
+        temp.tv_sec = end.tv_sec-start.tv_sec;
+        temp.tv_nsec = end.tv_nsec-start.tv_nsec;
+    }
+    return temp;
+}
 void cal_pixel(int i, int j){
     double y0 = j * ((upper - lower) / height) + lower;
     double x0 = i * ((right - left) / width) + left;
@@ -32,7 +46,15 @@ void cal_pixel(int i, int j){
     }
     image[j * width + i] = repeats;
 }
+void calEndTime(struct timespec *start, struct timespec *end){
+    struct timespec temp;
+    clock_gettime(CLOCK_MONOTONIC, end);
+    temp = diff(*start, *end);
+    double time_used = temp.tv_sec + (double) temp.tv_nsec / 1000000000.0;
+    IOTime += time_used;
+}
 void write_png(const char* filename, const int width, const int height, const int* buffer) {
+    struct timespec start, end;
     FILE* fp = fopen(filename, "wb");
     assert(fp);
     png_structp png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
@@ -42,7 +64,9 @@ void write_png(const char* filename, const int width, const int height, const in
     png_init_io(png_ptr, fp);
     png_set_IHDR(png_ptr, info_ptr, width, height, 8, PNG_COLOR_TYPE_RGB, PNG_INTERLACE_NONE,
                  PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
+    clock_gettime(CLOCK_MONOTONIC, &start);
     png_write_info(png_ptr, info_ptr);
+    calEndTime(&start, &end);
     size_t row_size = 3 * width * sizeof(png_byte);
     png_bytep row = (png_bytep)malloc(row_size);
     for (int y = 0; y < height; ++y) {
@@ -57,17 +81,23 @@ void write_png(const char* filename, const int width, const int height, const in
             row[x * 3] = ((p & 0xf) << 4);
             
         }
+        clock_gettime(CLOCK_MONOTONIC, &start);
         png_write_row(png_ptr, row);
+        calEndTime(&start, &end);
        // printf("write row %d\n", y);
     }
     free(row);
+    clock_gettime(CLOCK_MONOTONIC, &start);
     png_write_end(png_ptr, NULL);
+    calEndTime(&start, &end);
     png_destroy_write_struct(&png_ptr, &info_ptr);
     fclose(fp);
 }
 
 int main(int argc, char** argv) {
     /* argument parsing */
+    struct timespec start, end, temp;
+    clock_gettime(CLOCK_MONOTONIC, &start);
     assert(argc == 9);
     int num_threads = strtol(argv[1], 0, 10);
     left = strtod(argv[2], 0);
@@ -109,4 +139,11 @@ int main(int argc, char** argv) {
     }
     /* draw and cleanup */
     free(image);
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    temp = diff(start, end);
+    double time_used = temp.tv_sec + (double) temp.tv_nsec / 1000000000.0;
+    totalTime += time_used;
+    totalTime -= cummTime;
+    totalTime -= IOTime;
+    printf("%f %f %f\n", totalTime, cummTime, IOTime);
 }
